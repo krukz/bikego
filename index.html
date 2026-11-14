@@ -824,14 +824,16 @@ function drawReqs(){lg.clearLayers();drawHeat();S.reqs.forEach(function(r){var s
  var go=function(){if(S.tab==='publicar')return;S.tab='mapa';S.sel=r.id;render();drawReqs()};
  L.polyline(r.path||[r.a,r.b],{color:c,weight:sel?8:3+Math.min(r.apoyos,15)/3,opacity:sel?1:.8,dashArray:r.tipo==='conexion'?'8 8':null}).on('click',go).addTo(lg);
  [r.a,r.b].forEach(function(p){L.circleMarker(p,{radius:sel?9:6,color:'#111',weight:2,fillColor:c,fillOpacity:1}).on('click',go).addTo(lg)})})}
-function drawDraft(){dg.clearLayers();var d=S.draft;if(d.a)L.marker(d.a,{title:'A'}).addTo(dg).bindTooltip('A: inicio',{permanent:true,direction:'top'});if(d.b)L.marker(d.b,{title:'B'}).addTo(dg).bindTooltip('B: fin',{permanent:true,direction:'top'});if(d.a&&d.b)L.polyline(d.path||[d.a,d.b],{color:COL[d.tipo],weight:4,dashArray:'4 8'}).addTo(dg)}
-map.on('click',function(e){if(S.tab!=='publicar')return;var p=[+e.latlng.lat.toFixed(5),+e.latlng.lng.toFixed(5)],d=S.draft;if(!inUrban(p)){toast('Marca el tramo dentro del área de Santiago urbano');return}if(!d.a)d.a=p;else d.b=p;d.err='';d.dup=null;d.force=false;d.path=null;d.loading=false;drawDraft();if(d.a&&d.b)snapDraft();render()});
+function invalidateDraftRoute(){var d=S.draft;d.tok=(d.tok||0)+1;d.path=null;d.loading=false;d.err='';d.dup=null;d.force=false}
+function moveDraftPoint(key,p){var d=S.draft;d.dragging=false;if(!inUrban(p)){toast('El punto debe quedar dentro del área de Santiago urbano');drawDraft();if(d.a&&d.b)snapDraft();render();return false}d[key]=p;invalidateDraftRoute();drawDraft();if(d.a&&d.b)snapDraft();render();return true}
+function drawDraft(){dg.clearLayers();var d=S.draft;['a','b'].forEach(function(key){if(!d[key])return;var label=key.toUpperCase();L.marker(d[key],{title:label+': '+(key==='a'?'inicio':'fin')+' (arrastra para mover)',draggable:true,autoPan:true,bubblingMouseEvents:false}).addTo(dg).bindTooltip(label+': '+(key==='a'?'inicio':'fin'),{permanent:true,direction:'top'}).on('dragstart',function(){invalidateDraftRoute();d.dragging=true}).on('dragend',function(e){if(S.draft!==d)return;var ll=e.target.getLatLng();moveDraftPoint(key,[+ll.lat.toFixed(5),+ll.lng.toFixed(5)])})});if(d.a&&d.b)L.polyline(d.path||[d.a,d.b],{color:COL[d.tipo],weight:4,dashArray:'4 8',interactive:false}).addTo(dg)}
+map.on('click',function(e){if(S.tab!=='publicar')return;moveDraftPoint(S.draft.a?'b':'a',[+e.latlng.lat.toFixed(5),+e.latlng.lng.toFixed(5)])});
 /* ajuste a calles (router de bicicleta de OpenStreetMap) y zona de calor */
 var ROUTER='https://routing.openstreetmap.de/routed-bike/route/v1/driving/';
 function snap(a,b){return new Promise(function(res){try{var c=new AbortController(),to=setTimeout(function(){c.abort()},9000);
  fetch(ROUTER+a[1]+','+a[0]+';'+b[1]+','+b[0]+'?overview=full&geometries=geojson',{signal:c.signal}).then(function(r){return r.json()}).then(function(j){clearTimeout(to);
   var g=j&&j.routes&&j.routes[0]&&j.routes[0].geometry&&j.routes[0].geometry.coordinates;res(g&&g.length>1?g.map(function(q){return [+q[1].toFixed(5),+q[0].toFixed(5)]}):null)}).catch(function(){clearTimeout(to);res(null)})}catch(e){res(null)}})}
-function snapDraft(){var d=S.draft;d.tok=(d.tok||0)+1;var tk=d.tok;d.loading=true;snap(d.a,d.b).then(function(p){if(d.tok!==tk)return;d.loading=false;d.path=p;drawDraft();if(S.tab==='publicar')render()})}
+function snapDraft(){var d=S.draft;d.tok=(d.tok||0)+1;var tk=d.tok;d.loading=true;snap(d.a,d.b).then(function(p){if(S.draft!==d||d.tok!==tk||d.dragging)return;d.loading=false;d.path=p;drawDraft();if(S.tab==='publicar')render()})}
 function snapSeeds(){var q=S.reqs.filter(function(r){return !r.path&&!r.tried});(function next(){var r=q.shift();if(!r)return;r.tried=true;snap(r.a,r.b).then(function(p){if(p){r.path=p;save();drawReqs();if(S.sel===r.id)render()}next()})})()}
 function sample(path,step){var out=[path[0]];var acc=0;for(var i=1;i<path.length;i++){var d=hav(path[i-1],path[i]);if(d===0)continue;var n=Math.floor((acc+d)/step);for(var k=1;k<=n;k++){var f=(k*step-acc)/d;out.push([path[i-1][0]+(path[i][0]-path[i-1][0])*f,path[i-1][1]+(path[i][1]-path[i-1][1])*f])}acc=(acc+d)%step}out.push(path[path.length-1]);return out}
 var heat=null;
@@ -862,7 +864,7 @@ function detalle(r){var A=nearest(r.a),B=nearest(r.b),sv=S.saved.indexOf(r.id)>=
  '<div class="row" style="margin-top:8px"><a href="https://www.openstreetmap.org/?mlat='+r.a[0]+'&mlon='+r.a[1]+'#map=16/'+r.a[0]+'/'+r.a[1]+'" target="_blank" rel="noopener" class="meta">Abrir en OpenStreetMap ↗</a><button class="chip sp" data-report="'+r.id+'" '+(rp?'disabled':'')+'>'+(rp?'Reportado':'Reportar')+'</button></div>'+
  '<p class="hint">Reportar es una simulación local: no envía avisos a un moderador.</p><h4>Opiniones ('+r.coms.length+')</h4>'+(r.coms.length?'<ul class="coms">'+r.coms.map(function(c){return '<li><b>'+esc(c.a)+'</b>'+esc(c.t)+'</li>'}).join('')+'</ul>':'<p class="hint">Aún nadie opina sobre este tramo.</p>')+
  '<form data-cform="'+r.id+'" class="row" style="flex-wrap:nowrap"><input type="text" id="cin" placeholder="Escribe una opinión" autocomplete="off" aria-label="Tu opinión"><button class="b" type="submit">Enviar</button></form>'}
-function vPublicar(){var d=S.draft,msg=!d.a?'Toca el mapa para marcar el <b>inicio (A)</b> del tramo.':!d.b?'Ahora toca el <b>fin (B)</b>.':'Listo. Puedes tocar otra vez para mover B.';
+function vPublicar(){var d=S.draft,msg=!d.a?'Toca el mapa para marcar el <b>inicio (A)</b> del tramo.':!d.b?'Ahora toca el <b>fin (B)</b>.':'Listo. Arrastra A o B para corregir el tramo. También puedes tocar el mapa para mover B.';
  var info='';if(d.a&&d.b){var A=nearest(d.a),B=nearest(d.b);info='<div class="gap">'+esc(zona(d.a)+(zona(d.a)===zona(d.b)?'':' → '+zona(d.b)))+' · A está a '+fmt(A.d)+' y B a '+fmt(B.d)+' de la ciclovía más cercana.</div><p class="hint">'+(d.loading?'Ajustando el tramo a las calles…':d.path?'Tramo ajustado a las calles (OpenStreetMap).':'No se pudo ajustar a las calles: se usará una línea recta.')+'</p>'}
  return '<p class="hint" style="font-size:14px;color:var(--ink)">'+msg+'</p>'+info+
  '<label for="tp">Tipo de problema</label><select id="tp">'+Object.keys(TIPOS).map(function(k){return '<option value="'+k+'"'+(d.tipo===k?' selected':'')+'>'+TIPOS[k]+'</option>'}).join('')+'</select>'+
@@ -910,6 +912,7 @@ function csv(){var rows=[['posicion','tramo','tipo','apoyos','estado','lat_A','l
 function by(id){return S.reqs.filter(function(r){return r.id==id})[0]}
 function similar(d){var best=null;S.reqs.forEach(function(r){if(!vis(r))return;var s1=hav(d.a,r.a)<450&&hav(d.b,r.b)<450,s2=hav(d.a,r.b)<450&&hav(d.b,r.a)<450;if((s1||s2)&&(!best||r.apoyos>best.apoyos))best=r});return best}
 function publish(){var d=S.draft;
+ if(d.dragging){d.err='Suelta el punto antes de publicar.';return render()}
  if(d.a&&d.b&&(!inUrban(d.a)||!inUrban(d.b))){d.err='El tramo debe estar dentro del área de este piloto.';return render()}
  if(!d.a||!d.b){d.err='Marca el inicio (A) y el fin (B) en el mapa.';return render()}
  if(hav(d.a,d.b)<150){d.err='Los puntos A y B están muy cerca. Sepáralos para marcar un tramo.';return render()}
